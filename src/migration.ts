@@ -67,7 +67,7 @@ const getLastSuffix = async (dir: string, ignorePattern?: string) => {
 export const getTimestamp = (logger: Logger, filename: string): number => {
   const prefix = filename.split(SEPARATOR)[0]
   if (prefix && /^\d+$/.test(prefix)) {
-    if (prefix.length === 13) {
+    if (prefix.length === 14) {
       // timestamp: 1391877300255
       return Number(prefix)
     }
