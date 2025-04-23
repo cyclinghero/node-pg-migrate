@@ -1,5 +1,5 @@
 {
-  "name": "node-pg-migrate",
+  "name": "ch-node-pg-migrate",
   "version": "7.9.1",
   "description": "PostgreSQL database migration management tool for node.js",
   "scripts": {
@@ -56,7 +56,8 @@
   "author": "Theo Ephraim",
   "contributors": [
     "Salsita Software <jando@salsitasoft.com>",
-    "Christopher Quadflieg <chrissi92@hotmail.de>"
+    "Christopher Quadflieg <chrissi92@hotmail.de>",
+    "Mark Mulder <mark@cyclinghero.cc>"
   ],
   "type": "commonjs",
   "exports": {
