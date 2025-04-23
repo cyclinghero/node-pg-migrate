@@ -1,18 +1,21 @@
 {
   "compilerOptions": {
-    "target": "es2017",
-    "module": "commonjs",
-    "moduleResolution": "node",
-    "rootDir": "src",
-    "outDir": "dist",
-    "lib": ["es2019"],
+    "target": "ES2023",
+    "module": "ESNext",
+    "moduleResolution": "Node",
+    "lib": ["ES2023", "DOM"],
+    "noEmit": true,
+    "resolveJsonModule": true,
     "esModuleInterop": true,
     "sourceMap": false,
     "forceConsistentCasingInFileNames": true,
     "strict": true,
     "noImplicitAny": true,
     "noUnusedLocals": true,
-    "noImplicitOverride": true
+    "noImplicitOverride": true,
+    "skipLibCheck": true,
+    "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true
   },
-  "exclude": ["node_modules", "templates", "test", "dist", "bin", "migrations"]
+  "exclude": ["node_modules", "templates", "dist", "migrations"]
 }

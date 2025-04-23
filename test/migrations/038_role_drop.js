@@ -1,11 +1,11 @@
-const create = require('./035_role_add')
-const rename = require('./037_role_rename')
+import * as create from './035_role_add.js';
+import * as rename from './037_role_rename.js';
 
-exports.up = (pgm) => {
-  pgm.dropRole('rx')
-}
+export const up = (pgm) => {
+  pgm.dropRole('rx');
+};
 
-exports.down = (pgm) => {
-  create.up(pgm)
-  rename.up(pgm)
-}
+export const down = (pgm) => {
+  create.up(pgm);
+  rename.up(pgm);
+};

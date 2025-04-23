@@ -1,4 +1,4 @@
-exports.up = (pgm) => {
+export const up = (pgm) => {
   pgm.createTable(
     't_like',
     {},
@@ -10,8 +10,8 @@ exports.up = (pgm) => {
           excluding: ['INDEXES', 'STORAGE'],
         },
       },
-    },
-  )
-}
+    }
+  );
+};
 
-exports.down = () => null
+export const down = () => null;

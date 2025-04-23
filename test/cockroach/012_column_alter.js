@@ -1,11 +1,11 @@
-exports.up = (pgm) => {
+export const up = (pgm) => {
   pgm.alterColumn('t1', 'nmbr', {
     default: 10,
-  })
-}
+  });
+};
 
-exports.down = (pgm) => {
+export const down = (pgm) => {
   pgm.alterColumn('t1', 'nmbr', {
     default: null,
-  })
-}
+  });
+};

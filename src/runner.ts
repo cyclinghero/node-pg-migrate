@@ -1,175 +1,383 @@
-import path from 'path'
-import Db, { DBConnection } from './db'
-import { ColumnDefinitions } from './operations/tablesTypes'
-import { Migration, loadMigrationFiles, RunMigration } from './migration'
-import {
-  MigrationBuilderActions,
-  MigrationDirection,
-  RunnerOptionClient,
-  RunnerOptionUrl,
-  RunnerOption,
-  Logger,
-} from './types'
-import { createSchemalize, getMigrationTableSchema, getSchemas } from './utils'
-import migrateSqlFile from './sqlMigration'
+import { extname } from 'node:path';
+import type { ClientBase, ClientConfig } from 'pg';
+import type { DBConnection } from './db';
+import { db as Db } from './db';
+import type { LogFn, Logger } from './logger';
+import type { RunMigration } from './migration';
+import { getMigrationFilePaths, Migration } from './migration';
+import type { ColumnDefinitions } from './operations/tables';
+import type { MigrationBuilderActions } from './sqlMigration';
+import { sqlMigration as migrateSqlFile } from './sqlMigration';
+import { createSchemalize, getMigrationTableSchema, getSchemas } from './utils';
 
-// Random but well-known identifier shared by all instances of node-pg-migrate
-const PG_MIGRATE_LOCK_ID = 7241865325823964
+export interface RunnerOptionConfig {
+  /**
+   * The table storing which migrations have been run.
+   */
+  migrationsTable: string;
 
-const idColumn = 'id'
-const nameColumn = 'name'
-const runOnColumn = 'run_on'
+  /**
+   * The schema storing table which migrations have been run.
+   *
+   * (defaults to same value as `schema`)
+   */
+  migrationsSchema?: string;
 
-const loadMigrations = async (db: DBConnection, options: RunnerOption, logger: Logger) => {
+  /**
+   * The schema on which migration will be run.
+   *
+   * @default 'public'
+   */
+  schema?: string | string[];
+
+  /**
+   * The directory containing your migration files. This path is resolved from `cwd()`.
+   * Alternatively, provide a [glob](https://www.npmjs.com/package/glob) pattern or
+   * an array of glob patterns and set `useGlob = true`
+   *
+   * Note: enabling glob will read both, `dir` _and_ `ignorePattern` as glob patterns
+   */
+  dir: string | string[];
+
+  /**
+   * Use [glob](https://www.npmjs.com/package/glob) to find migration files.
+   * This will use `dir` _and_ `ignorePattern` to glob-search for migration files.
+   *
+   * Note: enabling glob will read both, `dir` _and_ `ignorePattern` as glob patterns
+   *
+   * @default false
+   */
+  useGlob?: boolean;
+
+  /**
+   * Check order of migrations before running them.
+   */
+  checkOrder?: boolean;
+
+  /**
+   * Direction of migration-run.
+   */
+  direction: MigrationDirection;
+
+  /**
+   * Number of migration to run.
+   */
+  count?: number;
+
+  /**
+   * Treats `count` as timestamp.
+   */
+  timestamp?: boolean;
+
+  /**
+   * Regex pattern for file names to ignore (ignores files starting with `.` by default).
+   * Alternatively, provide a [glob](https://www.npmjs.com/package/glob) pattern or
+   * an array of glob patterns and set `isGlob = true`
+   *
+   * Note: enabling glob will read both, `dir` _and_ `ignorePattern` as glob patterns
+   */
+  ignorePattern?: string | string[];
+
+  /**
+   * Run only migration with this name.
+   */
+  file?: string;
+
+  dryRun?: boolean;
+
+  /**
+   * Creates the configured schema if it doesn't exist.
+   */
+  createSchema?: boolean;
+
+  /**
+   * Creates the configured migration schema if it doesn't exist.
+   */
+  createMigrationsSchema?: boolean;
+
+  /**
+   * Combines all pending migrations into a single transaction so that if any migration fails, all will be rolled back.
+   *
+   * @default true
+   */
+  singleTransaction?: boolean;
+
+  /**
+   * Disables locking mechanism and checks.
+   */
+  noLock?: boolean;
+
+  /**
+   * Mark migrations as run without actually performing them (use with caution!).
+   */
+  fake?: boolean;
+
+  /**
+   * Runs [`decamelize`](https://github.com/sindresorhus/decamelize) on table/column/etc. names.
+   */
+  decamelize?: boolean;
+
+  /**
+   * Redirect log messages to this function, rather than `console`.
+   */
+  log?: LogFn;
+
+  /**
+   * Redirect messages to this logger object, rather than `console`.
+   */
+  logger?: Logger;
+
+  /**
+   * Print all debug messages like DB queries run (if you switch it on, it will disable `logger.debug` method).
+   */
+  verbose?: boolean;
+}
+
+export interface RunnerOptionUrl {
+  /**
+   * Connection string or client config which is passed to [new pg.Client](https://node-postgres.com/api/client#constructor)
+   */
+  databaseUrl: string | ClientConfig;
+}
+
+export interface RunnerOptionClient {
+  /**
+   * Instance of [new pg.Client](https://node-postgres.com/api/client).
+   *
+   * Instance should be connected to DB and after finishing migration, user is responsible to close connection.
+   */
+  dbClient: ClientBase;
+}
+
+export type RunnerOption = RunnerOptionConfig &
+  (RunnerOptionClient | RunnerOptionUrl);
+
+/**
+ * Random but well-known identifier shared by all instances of `node-pg-migrate`.
+ */
+const PG_MIGRATE_LOCK_ID = 7_241_865_325_823_964;
+
+const idColumn = 'id';
+const nameColumn = 'name';
+const runOnColumn = 'run_on';
+
+async function loadMigrations(
+  db: DBConnection,
+  options: RunnerOption,
+  logger: Logger
+): Promise<Migration[]> {
   try {
-    let shorthands: ColumnDefinitions = {}
-    const files = await loadMigrationFiles(options.dir, options.ignorePattern)
-    return (
-      await Promise.all(
-        files.map(async (file) => {
-          const filePath = `${options.dir}/${file}`
-          const actions: MigrationBuilderActions =
-            path.extname(filePath) === '.sql'
-              ? await migrateSqlFile(filePath)
-              : // eslint-disable-next-line global-require,import/no-dynamic-require,security/detect-non-literal-require
-                require(path.relative(__dirname, filePath))
-          shorthands = { ...shorthands, ...actions.shorthands }
-          return new Migration(
-            db,
-            filePath,
-            actions,
-            options,
-            {
-              ...shorthands,
-            },
-            logger,
-          )
-        }),
-      )
-    ).sort((m1, m2) => {
-      const compare = m1.timestamp - m2.timestamp
-      if (compare !== 0) return compare
-      return m1.name.localeCompare(m2.name)
-    })
+    let shorthands: ColumnDefinitions = {};
+    const absoluteFilePaths = await getMigrationFilePaths(options.dir, {
+      ignorePattern: options.ignorePattern,
+      useGlob: options.useGlob,
+      logger,
+    });
+
+    const migrations = await Promise.all(
+      absoluteFilePaths.map(async (filePath) => {
+        const actions: MigrationBuilderActions =
+          extname(filePath) === '.sql'
+            ? await migrateSqlFile(filePath)
+            : await import(`file://${filePath}`);
+        shorthands = { ...shorthands, ...actions.shorthands };
+
+        return new Migration(
+          db,
+          filePath,
+          actions,
+          options,
+          {
+            ...shorthands,
+          },
+          logger
+        );
+      })
+    );
+
+    return migrations;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  } catch (err: any) {
-    throw new Error(`Can't get migration files: ${err.stack}`)
+  } catch (error: any) {
+    throw new Error(`Can't get migration files: ${error.stack}`);
   }
 }
 
-const lock = async (db: DBConnection): Promise<void> => {
-  const [result] = await db.select(`select pg_try_advisory_lock(${PG_MIGRATE_LOCK_ID}) as "lockObtained"`)
+async function lock(db: DBConnection): Promise<void> {
+  const [result] = await db.select(
+    `SELECT pg_try_advisory_lock(${PG_MIGRATE_LOCK_ID}) AS "lockObtained"`
+  );
+
   if (!result.lockObtained) {
-    throw new Error('Another migration is already running')
+    throw new Error('Another migration is already running');
   }
 }
 
-const unlock = async (db: DBConnection): Promise<void> => {
-  const [result] = await db.select(`select pg_advisory_unlock(${PG_MIGRATE_LOCK_ID}) as "lockReleased"`)
+async function unlock(db: DBConnection): Promise<void> {
+  const [result] = await db.select(
+    `SELECT pg_advisory_unlock(${PG_MIGRATE_LOCK_ID}) AS "lockReleased"`
+  );
 
   if (!result.lockReleased) {
-    throw new Error('Failed to release migration lock')
+    throw new Error('Failed to release migration lock');
   }
 }
 
-const ensureMigrationsTable = async (db: DBConnection, options: RunnerOption): Promise<void> => {
+async function ensureMigrationsTable(
+  db: DBConnection,
+  options: RunnerOption
+): Promise<void> {
   try {
-    const schema = getMigrationTableSchema(options)
-    const { migrationsTable } = options
-    const fullTableName = createSchemalize(
-      Boolean(options.decamelize),
-      true,
-    )({
+    const schema = getMigrationTableSchema(options);
+    const { migrationsTable } = options;
+    const fullTableName = createSchemalize({
+      shouldDecamelize: Boolean(options.decamelize),
+      shouldQuote: true,
+    })({
       schema,
       name: migrationsTable,
-    })
+    });
 
     const migrationTables = await db.select(
-      `SELECT table_name FROM information_schema.tables WHERE table_schema = '${schema}' AND table_name = '${migrationsTable}'`,
-    )
+      `SELECT table_name FROM information_schema.tables WHERE table_schema = '${schema}' AND table_name = '${migrationsTable}'`
+    );
 
     if (migrationTables && migrationTables.length === 1) {
       const primaryKeyConstraints = await db.select(
-        `SELECT constraint_name FROM information_schema.table_constraints WHERE table_schema = '${schema}' AND table_name = '${migrationsTable}' AND constraint_type = 'PRIMARY KEY'`,
-      )
+        `SELECT constraint_name FROM information_schema.table_constraints WHERE table_schema = '${schema}' AND table_name = '${migrationsTable}' AND constraint_type = 'PRIMARY KEY'`
+      );
+
       if (!primaryKeyConstraints || primaryKeyConstraints.length !== 1) {
-        await db.query(`ALTER TABLE ${fullTableName} ADD PRIMARY KEY (${idColumn})`)
+        await db.query(
+          `ALTER TABLE ${fullTableName} ADD PRIMARY KEY (${idColumn})`
+        );
       }
     } else {
       await db.query(
-        `CREATE TABLE ${fullTableName} ( ${idColumn} SERIAL PRIMARY KEY, ${nameColumn} varchar(255) NOT NULL, ${runOnColumn} timestamp NOT NULL)`,
-      )
+        `CREATE TABLE ${fullTableName} (${idColumn} SERIAL PRIMARY KEY, ${nameColumn} varchar(255) NOT NULL, ${runOnColumn} timestamp NOT NULL)`
+      );
     }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  } catch (err: any) {
-    throw new Error(`Unable to ensure migrations table: ${err.stack}`)
+  } catch (error: any) {
+    throw new Error(`Unable to ensure migrations table: ${error.stack}`);
   }
 }
 
-const getRunMigrations = async (db: DBConnection, options: RunnerOption) => {
-  const schema = getMigrationTableSchema(options)
-  const { migrationsTable } = options
-  const fullTableName = createSchemalize(
-    Boolean(options.decamelize),
-    true,
-  )({
+async function getRunMigrations(
+  db: DBConnection,
+  options: RunnerOption
+): Promise<string[]> {
+  const schema = getMigrationTableSchema(options);
+  const { migrationsTable } = options;
+  const fullTableName = createSchemalize({
+    shouldDecamelize: Boolean(options.decamelize),
+    shouldQuote: true,
+  })({
     schema,
     name: migrationsTable,
-  })
-  return db.column(nameColumn, `SELECT ${nameColumn} FROM ${fullTableName} ORDER BY ${runOnColumn}, ${idColumn}`)
+  });
+
+  return db.column(
+    nameColumn,
+    `SELECT ${nameColumn} FROM ${fullTableName} ORDER BY ${runOnColumn}, ${idColumn}`
+  );
 }
 
-const getMigrationsToRun = (options: RunnerOption, runNames: string[], migrations: Migration[]): Migration[] => {
+function getMigrationsToRun(
+  options: RunnerOption,
+  runNames: string[],
+  migrations: Migration[]
+): Migration[] {
   if (options.direction === 'down') {
     const downMigrations: Array<string | Migration> = runNames
-      .filter((migrationName) => !options.file || options.file === migrationName)
-      .map((migrationName) => migrations.find(({ name }) => name === migrationName) || migrationName)
-    const { count = 1 } = options
+      .filter(
+        (migrationName) => !options.file || options.file === migrationName
+      )
+      .map(
+        (migrationName) =>
+          migrations.find(({ name }) => name === migrationName) || migrationName
+      );
+
+    const { count = 1 } = options;
+
     const toRun = (
       options.timestamp
-        ? downMigrations.filter((migration) => typeof migration === 'object' && migration.timestamp >= count)
+        ? downMigrations.filter(
+            (migration) =>
+              typeof migration === 'object' && migration.timestamp >= count
+          )
         : downMigrations.slice(-Math.abs(count))
-    ).reverse()
-    const deletedMigrations = toRun.filter((migration): migration is string => typeof migration === 'string')
-    if (deletedMigrations.length) {
-      const deletedMigrationsStr = deletedMigrations.join(', ')
-      throw new Error(`Definitions of migrations ${deletedMigrationsStr} have been deleted.`)
+    ).reverse();
+
+    const deletedMigrations = toRun.filter(
+      (migration): migration is string => typeof migration === 'string'
+    );
+
+    if (deletedMigrations.length > 0) {
+      const deletedMigrationsStr = deletedMigrations.join(', ');
+      throw new Error(
+        `Definitions of migrations ${deletedMigrationsStr} have been deleted.`
+      );
     }
-    return toRun as Migration[]
+
+    return toRun as Migration[];
   }
+
   const upMigrations = migrations.filter(
-    ({ name }) => runNames.indexOf(name) < 0 && (!options.file || options.file === name),
-  )
-  const { count = Infinity } = options
+    ({ name }) =>
+      !runNames.includes(name) && (!options.file || options.file === name)
+  );
+
+  const { count = Number.POSITIVE_INFINITY } = options;
+
   return options.timestamp
     ? upMigrations.filter(({ timestamp }) => timestamp <= count)
-    : upMigrations.slice(0, Math.abs(count))
+    : upMigrations.slice(0, Math.abs(count));
 }
 
-const checkOrder = (runNames: string[], migrations: Migration[]) => {
-  const len = Math.min(runNames.length, migrations.length)
+function checkOrder(runNames: string[], migrations: Migration[]): void {
+  const len = Math.min(runNames.length, migrations.length);
+
   for (let i = 0; i < len; i += 1) {
-    const runName = runNames[i]
-    const migrationName = migrations[i].name
+    const runName = runNames[i];
+    const migrationName = migrations[i].name;
+
     if (runName !== migrationName) {
-      throw new Error(`Not run migration ${migrationName} is preceding already run migration ${runName}`)
+      throw new Error(
+        `Not run migration ${migrationName} is preceding already run migration ${runName}`
+      );
     }
   }
 }
 
-const runMigrations = (toRun: Migration[], method: 'markAsRun' | 'apply', direction: MigrationDirection) =>
-  toRun.reduce(
-    (promise: Promise<unknown>, migration) => promise.then(() => migration[method](direction)),
-    Promise.resolve(),
-  )
+export type MigrationDirection = 'up' | 'down';
 
-const getLogger = ({ log, logger, verbose }: RunnerOption): Logger => {
-  let loggerObject: Logger = console
+function runMigrations(
+  toRun: Migration[],
+  method: 'markAsRun' | 'apply',
+  direction: MigrationDirection
+): Promise<unknown> {
+  return toRun.reduce<Promise<unknown>>(
+    (promise, migration) => promise.then(() => migration[method](direction)),
+    Promise.resolve()
+  );
+}
+
+function getLogger(options: RunnerOption): Logger {
+  const { log, logger, verbose } = options;
+
+  let loggerObject: Logger = console;
+
   if (typeof logger === 'object') {
-    loggerObject = logger
+    loggerObject = logger;
   } else if (typeof log === 'function') {
-    loggerObject = { debug: log, info: log, warn: log, error: log }
+    loggerObject = {
+      debug: log,
+      info: log,
+      warn: log,
+      error: log,
+    };
   }
+
   return verbose
     ? loggerObject
     : {
@@ -177,81 +385,110 @@ const getLogger = ({ log, logger, verbose }: RunnerOption): Logger => {
         info: loggerObject.info.bind(loggerObject),
         warn: loggerObject.warn.bind(loggerObject),
         error: loggerObject.error.bind(loggerObject),
-      }
+      };
 }
 
-export default async (options: RunnerOption): Promise<RunMigration[]> => {
-  const logger = getLogger(options)
-  const db = Db((options as RunnerOptionClient).dbClient || (options as RunnerOptionUrl).databaseUrl, logger)
+export async function runner(options: RunnerOption): Promise<RunMigration[]> {
+  const logger = getLogger(options);
+
+  const connection =
+    (options as RunnerOptionClient).dbClient ||
+    (options as RunnerOptionUrl).databaseUrl;
+
+  if (connection == null) {
+    throw new Error('You must provide either a databaseUrl or a dbClient');
+  }
+
+  const db = Db(connection, logger);
+
   try {
-    await db.createConnection()
+    await db.createConnection();
 
     if (!options.noLock) {
-      await lock(db)
+      await lock(db);
     }
 
     if (options.schema) {
-      const schemas = getSchemas(options.schema)
+      const schemas = getSchemas(options.schema);
+
       if (options.createSchema) {
-        await Promise.all(schemas.map((schema) => db.query(`CREATE SCHEMA IF NOT EXISTS "${schema}"`)))
+        await Promise.all(
+          schemas.map((schema) =>
+            db.query(`CREATE SCHEMA IF NOT EXISTS "${schema}"`)
+          )
+        );
       }
-      await db.query(`SET search_path TO ${schemas.map((s) => `"${s}"`).join(', ')}`)
-    }
-    if (options.migrationsSchema && options.createMigrationsSchema) {
-      await db.query(`CREATE SCHEMA IF NOT EXISTS "${options.migrationsSchema}"`)
+
+      await db.query(
+        `SET search_path TO ${schemas.map((s) => `"${s}"`).join(', ')}`
+      );
     }
 
-    await ensureMigrationsTable(db, options)
+    if (options.migrationsSchema && options.createMigrationsSchema) {
+      await db.query(
+        `CREATE SCHEMA IF NOT EXISTS "${options.migrationsSchema}"`
+      );
+    }
+
+    await ensureMigrationsTable(db, options);
 
     const [migrations, runNames] = await Promise.all([
       loadMigrations(db, options, logger),
       getRunMigrations(db, options),
-    ])
+    ]);
 
-    if (options.checkOrder) {
-      checkOrder(runNames, migrations)
+    if (options.checkOrder !== false) {
+      checkOrder(runNames, migrations);
     }
 
-    const toRun: Migration[] = getMigrationsToRun(options, runNames, migrations)
+    const toRun: Migration[] = getMigrationsToRun(
+      options,
+      runNames,
+      migrations
+    );
 
-    if (!toRun.length) {
-      logger.info('No migrations to run!')
-      return []
+    if (toRun.length === 0) {
+      logger.info('No migrations to run!');
+      return [];
     }
 
     // TODO: add some fancy colors to logging
-    logger.info('> Migrating files:')
-    toRun.forEach((m) => {
-      logger.info(`> - ${m.name}`)
-    })
+    logger.info('> Migrating files:');
+    for (const m of toRun) {
+      logger.info(`> - ${m.name}`);
+    }
 
     if (options.fake) {
-      await runMigrations(toRun, 'markAsRun', options.direction)
+      await runMigrations(toRun, 'markAsRun', options.direction);
     } else if (options.singleTransaction) {
-      await db.query('BEGIN')
+      await db.query('BEGIN');
+
       try {
-        await runMigrations(toRun, 'apply', options.direction)
-        await db.query('COMMIT')
-      } catch (err) {
-        logger.warn('> Rolling back attempted migration ...')
-        await db.query('ROLLBACK')
-        throw err
+        await runMigrations(toRun, 'apply', options.direction);
+        await db.query('COMMIT');
+      } catch (error) {
+        logger.warn('> Rolling back attempted migration ...');
+        await db.query('ROLLBACK');
+        throw error;
       }
     } else {
-      await runMigrations(toRun, 'apply', options.direction)
+      await runMigrations(toRun, 'apply', options.direction);
     }
 
     return toRun.map((m) => ({
       path: m.path,
       name: m.name,
       timestamp: m.timestamp,
-    }))
+    }));
   } finally {
     if (db.connected()) {
       if (!options.noLock) {
-        await unlock(db).catch((error) => logger.warn(error.message))
+        await unlock(db).catch((error: unknown) => {
+          logger.warn((error as Error).message);
+        });
       }
-      db.close()
+
+      await db.close();
     }
   }
 }

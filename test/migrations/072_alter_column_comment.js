@@ -1,15 +1,15 @@
-exports.comment = 'This is my comment'
-const schema = 'comment_schema'
-exports.table = { schema, name: 't' }
+export const comment = 'This is my comment';
+const schema = 'comment_schema';
+export const table = { schema, name: 't' };
 
-exports.up = (pgm) => {
-  pgm.createSchema(schema)
-  pgm.createTable(exports.table, { id: 'id' })
-  pgm.alterColumn(exports.table, 'id', { type: 'text' })
-  pgm.alterColumn(exports.table, 'id', { comment: exports.comment })
-}
+export const up = (pgm) => {
+  pgm.createSchema(schema);
+  pgm.createTable(table, { id: 'id' });
+  pgm.alterColumn(table, 'id', { type: 'text' });
+  pgm.alterColumn(table, 'id', { comment: comment });
+};
 
-exports.down = (pgm) => {
-  pgm.dropTable(exports.table)
-  pgm.dropSchema(schema)
-}
+export const down = (pgm) => {
+  pgm.dropTable(table);
+  pgm.dropSchema(schema);
+};

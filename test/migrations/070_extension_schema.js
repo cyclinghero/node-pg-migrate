@@ -1,4 +1,4 @@
-exports.up = (pgm) => {
-  pgm.createSchema('extension-test')
-  pgm.createExtension('ltree', { schema: 'extension-test' })
-}
+export const up = (pgm) => {
+  pgm.createSchema('extension-test');
+  pgm.createExtension('ltree', { schema: 'extension-test' });
+};

@@ -1,7 +1,7 @@
-exports.up = (pgm) => {
-  pgm.setTypeAttribute('obj', 'id', 'smallint')
-}
+export const up = (pgm) => {
+  pgm.setTypeAttribute('obj', 'id', 'smallint');
+};
 
-exports.down = (pgm) => {
-  pgm.setTypeAttribute('obj', 'id', 'integer')
-}
+export const down = (pgm) => {
+  pgm.setTypeAttribute('obj', 'id', 'integer');
+};

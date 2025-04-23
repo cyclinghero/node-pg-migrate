@@ -1,5 +1,5 @@
-exports.up = (pgm) => {
-  pgm.sql("select (ROW(1, 'x')::obj).str;")
-}
+export const up = (pgm) => {
+  pgm.sql("SELECT (ROW(1, 'x')::obj).str;");
+};
 
-exports.down = () => null
+export const down = () => null;

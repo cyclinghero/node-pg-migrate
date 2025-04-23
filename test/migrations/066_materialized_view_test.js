@@ -1,5 +1,5 @@
-exports.up = (pgm) => {
-  pgm.sql('SELECT id, str FROM mv')
-}
+export const up = (pgm) => {
+  pgm.sql('SELECT id, str FROM mv');
+};
 
-exports.down = () => null
+export const down = () => null;

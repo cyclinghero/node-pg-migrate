@@ -1,3 +1,3 @@
-exports.up = (pgm) => {
-  pgm.renameTypeAttribute('obj', 'string', 'str')
-}
+export const up = (pgm) => {
+  pgm.renameTypeAttribute('obj', 'string', 'str');
+};

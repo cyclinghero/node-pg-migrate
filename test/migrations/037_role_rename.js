@@ -1,3 +1,3 @@
-exports.up = (pgm) => {
-  pgm.renameRole('r', 'rx')
-}
+export const up = (pgm) => {
+  pgm.renameRole('r', 'rx');
+};

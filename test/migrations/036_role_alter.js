@@ -1,7 +1,7 @@
-exports.up = (pgm) => {
-  pgm.alterRole('r', { login: false })
-}
+export const up = (pgm) => {
+  pgm.alterRole('r', { login: false });
+};
 
-exports.down = (pgm) => {
-  pgm.alterRole('r', { login: true })
-}
+export const down = (pgm) => {
+  pgm.alterRole('r', { login: true });
+};

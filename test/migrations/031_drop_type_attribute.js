@@ -1,7 +1,7 @@
-exports.up = (pgm) => {
-  pgm.dropTypeAttribute('obj', 'str')
-}
+export const up = (pgm) => {
+  pgm.dropTypeAttribute('obj', 'str');
+};
 
-exports.down = (pgm) => {
-  pgm.addTypeAttribute('obj', 'str', 'text')
-}
+export const down = (pgm) => {
+  pgm.addTypeAttribute('obj', 'str', 'text');
+};
